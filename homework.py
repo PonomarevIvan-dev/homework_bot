@@ -1,10 +1,20 @@
 import logging
 import os
+import sys
 import time
+from http import HTTPStatus
 
+from dotenv import load_dotenv
 import requests
 from telebot import TeleBot
-from dotenv import load_dotenv
+
+from errors import (
+    EndpointError,
+    MessageSendingError,
+    DataTypeError,
+    ResponseFormatError,
+)
+
 
 load_dotenv()
 
@@ -38,48 +48,6 @@ HOMEWORK_VERDICTS = {
 }
 
 
-class ServiceError(Exception):
-    """Ошибка отсутствия доступа по заданному эндпойнту."""
-
-    pass
-
-
-class NetworkError(Exception):
-    """Ошибка отсутствия сети."""
-
-    pass
-
-
-class EndpointError(Exception):
-    """Ошибка, если эндпойнт не корректен."""
-
-    pass
-
-
-class MessageSendingError(Exception):
-    """Ошибка отправки сообщения."""
-
-    pass
-
-
-class GlobalsError(Exception):
-    """Ошибка, если есть пустые глобальные переменные."""
-
-    pass
-
-
-class DataTypeError(Exception):
-    """Ошибка, если тип данных не dict."""
-
-    pass
-
-
-class ResponseFormatError(Exception):
-    """Ошибка, если формат response не json."""
-
-    pass
-
-
 def check_tokens():
     """Проверяет доступность переменных окружения."""
     for token_name, token in {
@@ -87,9 +55,6 @@ def check_tokens():
         'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
         'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
     }.items():
-        if token is None:
-            logging.critical(f'{GLOBAL_VARIABLE_IS_MISSING}: {token_name}')
-            return False
         if not token:
             logging.critical(f'{GLOBAL_VARIABLE_IS_EMPTY}: {token_name}')
             return False
@@ -112,21 +77,23 @@ def send_message(bot, message):
 
 def get_api_answer(timestamp):
     """Делает запрос к единственному эндпоинту API-сервиса."""
-    timestamp = timestamp or int(time.time())
     params = {'from_date': timestamp}
-    all_params = dict(url=ENDPOINT, headers=HEADERS, params=params)
     try:
-        response = requests.get(**all_params)
+        response = requests.get(url=ENDPOINT, headers=HEADERS, params=params)
     except requests.exceptions.RequestException as error:
         raise TeleBot.TelegramError(CONNECTION_ERROR.format(
             error=error,
-            **all_params,
+            url=ENDPOINT,
+            headers=HEADERS,
+            params=params,
         ))
     response_status = response.status_code
-    if response_status != 200:
+    if response_status != HTTPStatus.OK:
         raise EndpointError(WRONG_ENDPOINT.format(
             response_status=response_status,
-            **all_params,
+            url=ENDPOINT,
+            headers=HEADERS,
+            params=params,
         ))
     try:
         return response.json()
@@ -180,7 +147,9 @@ def parse_status(homework):
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
-        raise GlobalsError('Ошибка глобальной переменной. Смотрите логи.')
+        logging.critical('Ошибка глобальной переменной. Смотрите логи.')
+        sys.exit(1)  # Завершение программы с кодом 1 (ошибка)
+
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
 
@@ -196,11 +165,7 @@ def main():
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             send_message(bot, message)
-
-        except IndexError:
-            message = 'Статус работы не изменился'
-            send_message(bot, message)
-            logging.info(message)
+            logging.error(message)
 
         finally:
             time.sleep(RETRY_PERIOD)
