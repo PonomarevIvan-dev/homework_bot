@@ -50,15 +50,7 @@ HOMEWORK_VERDICTS = {
 
 def check_tokens():
     """Проверяет доступность переменных окружения."""
-    for token_name, token in {
-        'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
-        'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
-        'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
-    }.items():
-        if not token:
-            logging.critical(f'{GLOBAL_VARIABLE_IS_EMPTY}: {token_name}')
-            return False
-    return True
+    return all([PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID])
 
 
 def send_message(bot, message):
@@ -103,8 +95,8 @@ def get_api_answer(timestamp):
 
 def check_response(response):
     """
-    Возвращает домашку, если есть.
-    Проверяет валидность её статуса.
+    Проверяет корректность структуры ответа API.
+    Возвращает список домашних работ.
     """
     if not isinstance(response, dict):
         raise TypeError('Ответ API должен быть словарём')
@@ -116,11 +108,7 @@ def check_response(response):
     if not isinstance(homeworks, list):
         raise TypeError('Данные под ключом "homeworks" должны быть списком')
 
-    if not homeworks:
-        logging.debug('Список домашних работ пуст.')
-        raise IndexError(LIST_IS_EMPTY)
-
-    return homeworks[0]
+    return homeworks
 
 
 def parse_status(homework):
@@ -147,8 +135,8 @@ def parse_status(homework):
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
-        logging.critical('Ошибка глобальной переменной. Смотрите логи.')
-        sys.exit(1)  # Завершение программы с кодом 1 (ошибка)
+        logging.critical('Одна или более глобальных переменных отсутствуют.')
+        sys.exit('Ошибка: проверьте переменные окружения.')
 
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
@@ -156,20 +144,31 @@ def main():
     while True:
         try:
             response = get_api_answer(timestamp)
-            homework = check_response(response)
-            message = parse_status(homework)
-            send_message(bot, message)
-            logging.info(homework)
+            homeworks = check_response(response)
+
+            if not homeworks:
+                logging.info('Новых домашних работ нет.')
+            else:
+                for homework in homeworks:
+                    message = parse_status(homework)
+                    send_message(bot, message)
+                    logging.info('Статус домашней работы обновлен:'
+                                 f'{homework}')
+
             timestamp = response.get('current_date')
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            send_message(bot, message)
             logging.error(message)
+            try:
+                send_message(bot, message)
+            except MessageSendingError:
+                logging.error('Не удалось отправить'
+                              'сообщение об ошибке в Telegram.')
 
         finally:
+            logging.debug('Переход в режим ожидания...')
             time.sleep(RETRY_PERIOD)
-        logging.info(MESSAGE_IS_SENT.format(message))
 
 
 if __name__ == '__main__':
